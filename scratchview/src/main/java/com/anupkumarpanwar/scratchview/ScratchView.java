@@ -11,9 +11,11 @@ import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.media.ThumbnailUtils;
 import android.os.AsyncTask;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -116,11 +118,60 @@ public class ScratchView extends View {
         init();
     }
 
-    /**
-     * Initialises the paint drawing elements.
-     */
-    private void init() {
+    public void setOverlay(Bitmap bitmap) {
+        scratchBitmap = bitmap;
+        mDrawable = new BitmapDrawable(getResources(), scratchBitmap);
+        updateLayout();
+    }
 
+    public void setOverlay(Bitmap bitmap, int width, int height) {
+        scratchBitmap = bitmap;
+        scratchBitmap = resize(scratchBitmap, width, height);
+        mDrawable = new BitmapDrawable(getResources(), scratchBitmap);
+        updateLayout();
+    }
+
+    public void setOverlay(int resource) {
+        scratchBitmap = drawableToBitmap(ContextCompat.getDrawable(getContext(), resource));
+        mDrawable = new BitmapDrawable(getResources(), scratchBitmap);
+        updateLayout();
+    }
+
+    public void setOverlay(int resource, int width, int height) {
+        scratchBitmap = drawableToBitmap(ContextCompat.getDrawable(getContext(), resource));
+        scratchBitmap = resize(scratchBitmap, width, height);
+        mDrawable = new BitmapDrawable(getResources(), scratchBitmap);
+        updateLayout();
+    }
+
+    public void setTileMode(Shader.TileMode tileMode) {
+        mDrawable.setTileModeXY(tileMode, tileMode);
+    }
+    private void updateLayout() {
+        post(()-> {
+            updateCanvas();
+            invalidate();
+            requestLayout();
+        });
+    }
+    private void updateCanvas() {
+        mScratchBitmap = Bitmap.createBitmap(getWidth(), getHeight(), Bitmap.Config.ARGB_8888);
+        mCanvas = new Canvas(mScratchBitmap);
+
+        Rect rect = new Rect(0, 0, getWidth(), getHeight());
+        mDrawable.setBounds(rect);
+
+        int startGradientColor = ContextCompat.getColor(getContext(), R.color.scratch_start_gradient);
+        int endGradientColor = ContextCompat.getColor(getContext(), R.color.scratch_end_gradient);
+
+
+        mGradientBgPaint.setShader(new LinearGradient(0, 0, 0, getHeight(),
+                startGradientColor, endGradientColor, Shader.TileMode.MIRROR));
+
+        mCanvas.drawRect(rect, mGradientBgPaint);
+        mDrawable.draw(mCanvas);
+    }
+    private void defaults() {
         mTouchPath = new Path();
 
         mErasePaint = new Paint();
@@ -138,6 +189,14 @@ public class ScratchView extends View {
 
         mErasePath = new Path();
         mBitmapPaint = new Paint(Paint.DITHER_FLAG);
+    }
+
+
+    /**
+     * Initialises the paint drawing elements.
+     */
+    private void init() {
+        defaults();
 
         TypedArray arr = mContext.obtainStyledAttributes(attrs, R.styleable.ScratchView,
                 styleAttr, 0);
@@ -153,9 +212,8 @@ public class ScratchView extends View {
             tileMode = "CLAMP";
         }
         scratchBitmap = BitmapFactory.decodeResource(getResources(), overlayImage);
-        if (scratchBitmap == null) {
+        if (scratchBitmap == null)
             scratchBitmap = drawableToBitmap(ContextCompat.getDrawable(getContext(), overlayImage));
-        }
         scratchBitmap = Bitmap.createScaledBitmap(scratchBitmap, (int) overlayWidth, (int) overlayHeight, false);
         mDrawable = new BitmapDrawable(getResources(), scratchBitmap);
 
@@ -169,7 +227,51 @@ public class ScratchView extends View {
             default:
                 mDrawable.setTileModeXY(Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
         }
+    }
 
+    private static Bitmap resize(Bitmap src, int maxWidth, int maxHeight) {
+        float ratio = maxWidth / (float) maxHeight;
+        Bitmap dst;
+        
+        if (src.getWidth() >= src.getHeight())
+            dst = Bitmap.createBitmap(src,
+                    src.getWidth()/2 - src.getHeight()/2, 0,
+                    (int) (src.getHeight() / ratio), src.getHeight());
+        else dst = Bitmap.createBitmap(src, 0,
+                    src.getHeight()/2 - src.getWidth()/2,
+                    src.getWidth(), (int) (src.getWidth() * ratio));
+        return ThumbnailUtils.extractThumbnail(dst, maxWidth, maxHeight);
+
+//        int sourceWidth = source.getWidth();
+//        int sourceHeight = source.getHeight();
+//
+//        // Compute the scaling factors to fit the new height and width, respectively.
+//        // To cover the final image, the final scaling will be the bigger
+//        // of these two.
+//        float xScale = (float) maxWidth / sourceWidth;
+//        float yScale = (float) maxHeight / sourceHeight;
+//        float scale = Math.max(xScale, yScale);
+//
+//        // Now get the size of the source bitmap when scaled
+//        float scaledWidth = scale * sourceWidth;
+//        float scaledHeight = scale * sourceHeight;
+//
+//        // Let's find out the upper left coordinates if the scaled bitmap
+//        // should be centered in the new size give by the parameters
+//        float left = (maxWidth - scaledWidth) / 2;
+//        float top = (maxHeight - scaledHeight) / 2;
+//
+//        // The target rectangle for the new, scaled version of the source bitmap will now
+//        // be
+//        RectF targetRect = new RectF(left, top, left + scaledWidth, top + scaledHeight);
+//
+//        // Finally, we create a new bitmap of the specified size and draw our new,
+//        // scaled bitmap onto it.
+//        Bitmap dest = Bitmap.createBitmap(maxWidth, maxHeight, source.getConfig());
+//        Canvas canvas = new Canvas(dest);
+//        canvas.drawBitmap(source, null, targetRect, null);
+//
+//        return dest;
     }
 
     /**
@@ -184,26 +286,11 @@ public class ScratchView extends View {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        mScratchBitmap = Bitmap.createBitmap(getWidth(), getHeight(), Bitmap.Config.ARGB_8888);
-        mCanvas = new Canvas(mScratchBitmap);
-
-        Rect rect = new Rect(0, 0, getWidth(), getHeight());
-        mDrawable.setBounds(rect);
-
-        int startGradientColor = ContextCompat.getColor(getContext(), R.color.scratch_start_gradient);
-        int endGradientColor = ContextCompat.getColor(getContext(), R.color.scratch_end_gradient);
-
-
-        mGradientBgPaint.setShader(new LinearGradient(0, 0, 0, getHeight(), startGradientColor, endGradientColor, Shader.TileMode.MIRROR));
-
-        mCanvas.drawRect(rect, mGradientBgPaint);
-        mDrawable.draw(mCanvas);
-//        Toast.makeText(mContext, String.valueOf(getWidth()), Toast.LENGTH_LONG).show();
+        updateCanvas();
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
-
         super.onDraw(canvas);
         canvas.drawBitmap(mScratchBitmap, 0, 0, mBitmapPaint);
         canvas.drawPath(mErasePath, mErasePaint);
